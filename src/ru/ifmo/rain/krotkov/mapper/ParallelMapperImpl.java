@@ -7,7 +7,7 @@ import java.util.function.Function;
 
 public class ParallelMapperImpl implements ParallelMapper {
 
-    private List<Thread> workingThreads;
+    private final List<Thread> workingThreads;
     private final Queue<Runnable> tasksQueue;
 
     public ParallelMapperImpl(int threadsNumber) {
@@ -17,6 +17,7 @@ public class ParallelMapperImpl implements ParallelMapper {
 
         workingThreads = new ArrayList<>();
         tasksQueue = new ArrayDeque<>();
+
 
         Runnable worker = () -> {
             try {
