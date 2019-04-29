@@ -63,7 +63,9 @@ public class ParallelMapperImpl implements ParallelMapper {
         }
 
         void setException(Exception e) {
-            exception = e;
+            synchronized (this) {
+                exception = e;
+            }
         }
 
         Exception getException() {
@@ -107,9 +109,7 @@ public class ParallelMapperImpl implements ParallelMapper {
                     try {
                         resultList.set(pos, f.apply(args.get(pos)));
                     } catch (Exception e) {
-                        synchronized (taskMeta) {
                             taskMeta.setException(e);
-                        }
                     } finally {
                         taskMeta.incrementCounter();
                     }
