@@ -8,7 +8,7 @@ import java.util.function.Function;
 public class ParallelMapperImpl implements ParallelMapper {
 
     private List<Thread> workingThreads;
-    private final Queue<TaskWrapper> taskWrappersQueue;
+    private final Queue<Runnable> taskWrappersQueue;
 
     public ParallelMapperImpl(int threadsNumber) {
         if (threadsNumber <= 0) {
@@ -36,7 +36,7 @@ public class ParallelMapperImpl implements ParallelMapper {
     }
 
     private void doTask() throws InterruptedException {
-        TaskWrapper taskWrapper;
+        Runnable taskWrapper;
         synchronized (taskWrappersQueue) {
             while (taskWrappersQueue.isEmpty()) {
                 taskWrappersQueue.wait();
@@ -48,29 +48,14 @@ public class ParallelMapperImpl implements ParallelMapper {
         taskWrapper.run();
     }
 
-    private class Counter {
+    private class TaskMeta {
+        Exception exception = null;
         private int cnt;
         private int bound;
 
-        Counter(int bound) {
+
+        TaskMeta(int bound) {
             this.bound = bound;
-        }
-
-        void increment() {
-            cnt++;
-        }
-
-        boolean isFull() {
-            return cnt >= bound;
-        }
-    }
-
-    private class TaskMeta {
-        Exception exception = null;
-        final Counter counter;
-
-        TaskMeta(Counter counter) {
-            this.counter = counter;
         }
 
         boolean hasException() {
@@ -86,49 +71,19 @@ public class ParallelMapperImpl implements ParallelMapper {
         }
 
         void incrementCounter() {
-            synchronized (counter) {
-                counter.increment();
-                if (counter.isFull()) {
-                    counter.notify();
+            synchronized (this) {
+                cnt++;
+                if (cnt >= bound) {
+                    this.notify();
                 }
             }
         }
 
         void waitCompletion() throws InterruptedException {
-            synchronized (counter) {
-                while (!counter.isFull()) {
-                    counter.wait();
+            synchronized (this) {
+                while (!(cnt >= bound)) {
+                    this.wait();
                 }
-            }
-        }
-    }
-
-    private class TaskWrapper {
-        Runnable task;
-        final TaskMeta meta;
-
-        TaskWrapper(Runnable task, TaskMeta meta) {
-            this.task = task;
-            this.meta = meta;
-        }
-
-        void incrementCounter() {
-            meta.incrementCounter();
-        }
-
-        Exception getException() {
-            return meta.getException();
-        }
-
-        void run() {
-            try {
-                task.run();
-            } catch (Exception e) {
-                synchronized (meta) {
-                    meta.setException(e);
-                }
-            } finally {
-                incrementCounter();
             }
         }
     }
@@ -143,13 +98,22 @@ public class ParallelMapperImpl implements ParallelMapper {
     @Override
     public <T, R> List<R> map(Function<? super T, ? extends R> f, List<? extends T> args) throws InterruptedException {
         List<R> resultList = new ArrayList<>(Collections.nCopies(args.size(), null));
-        TaskMeta taskMeta = new TaskMeta(new Counter(args.size()));
+        TaskMeta taskMeta = new TaskMeta(args.size());
 
         for (int i = 0; i < args.size(); i++) {
             final int pos = i;
-            TaskWrapper wrapper = new TaskWrapper(/*Task*/() -> resultList.set(pos, f.apply(args.get(pos))), taskMeta);
             synchronized (taskWrappersQueue) {
-                taskWrappersQueue.add(wrapper);
+                taskWrappersQueue.add(() -> {
+                    try {
+                        resultList.set(pos, f.apply(args.get(pos)));
+                    } catch (Exception e) {
+                        synchronized (taskMeta) {
+                            taskMeta.setException(e);
+                        }
+                    } finally {
+                        taskMeta.incrementCounter();
+                    }
+                });
                 taskWrappersQueue.notify();
             }
         }
