@@ -8,7 +8,7 @@ import java.util.function.Function;
 public class ParallelMapperImpl implements ParallelMapper {
 
     private List<Thread> workingThreads;
-    private final Queue<Runnable> taskWrappersQueue;
+    private final Queue<Runnable> tasksQueue;
 
     public ParallelMapperImpl(int threadsNumber) {
         if (threadsNumber <= 0) {
@@ -16,7 +16,7 @@ public class ParallelMapperImpl implements ParallelMapper {
         }
 
         workingThreads = new ArrayList<>();
-        taskWrappersQueue = new ArrayDeque<>();
+        tasksQueue = new ArrayDeque<>();
 
         Runnable worker = () -> {
             try {
@@ -36,20 +36,20 @@ public class ParallelMapperImpl implements ParallelMapper {
     }
 
     private void doTask() throws InterruptedException {
-        Runnable taskWrapper;
-        synchronized (taskWrappersQueue) {
-            while (taskWrappersQueue.isEmpty()) {
-                taskWrappersQueue.wait();
+        Runnable task;
+        synchronized (tasksQueue) {
+            while (tasksQueue.isEmpty()) {
+                tasksQueue.wait();
             }
 
-            taskWrapper = taskWrappersQueue.poll();
+            task = tasksQueue.poll();
         }
 
-        taskWrapper.run();
+        task.run();
     }
 
     private class TaskMeta {
-        Exception exception = null;
+        private Exception exception = null;
         private int cnt;
         private int bound;
 
@@ -98,8 +98,8 @@ public class ParallelMapperImpl implements ParallelMapper {
 
         for (int i = 0; i < args.size(); i++) {
             final int pos = i;
-            synchronized (taskWrappersQueue) {
-                taskWrappersQueue.add(() -> {
+            synchronized (tasksQueue) {
+                tasksQueue.add(() -> {
                     try {
                         resultList.set(pos, f.apply(args.get(pos)));
                     } catch (Exception e) {
@@ -108,7 +108,7 @@ public class ParallelMapperImpl implements ParallelMapper {
                         taskMeta.incrementCounter();
                     }
                 });
-                taskWrappersQueue.notify();
+                tasksQueue.notify();
             }
         }
 
