@@ -12,11 +12,11 @@ public class WebCrawler implements Crawler {
     private final ExecutorService downloadersPoll; /* Get pages */
     private final ExecutorService extractorsPoll; /* Parse page */
     private final Downloader downloader;
-
     private class HostData {
         int load;
         Queue<Runnable> tasks = new ArrayDeque<>();
     }
+
     private final Map<String, HostData> hostDataMap;
 
     public WebCrawler(Downloader downloader, int downloaders, int extractors, int perHost) {
@@ -40,7 +40,9 @@ public class WebCrawler implements Crawler {
 
     private void downloadRec(String url, int stepsLeft, Phaser phaser,
                              final Set<String> result, final Map<String, IOException> exceptions) {
-        if (result.contains(url)) { return; }
+        if (result.contains(url)) {
+            return;
+        }
         result.add(url);
 
         getHost(url, exceptions).ifPresent(hostName -> {
@@ -124,7 +126,7 @@ public class WebCrawler implements Crawler {
     public static void main(String[] args) {
         try {
             if (args.length <= 2) {
-                System.out.println("Two parametres expected");
+                System.out.println("Two parameters expected");
                 return;
             }
 

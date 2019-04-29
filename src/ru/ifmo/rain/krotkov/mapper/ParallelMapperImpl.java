@@ -62,30 +62,24 @@ public class ParallelMapperImpl implements ParallelMapper {
             return exception != null;
         }
 
-        void setException(Exception e) {
-            synchronized (this) {
-                exception = e;
-            }
+        synchronized void setException(Exception e) {
+            exception = e;
         }
 
         Exception getException() {
             return exception;
         }
 
-        void incrementCounter() {
-            synchronized (this) {
-                cnt++;
-                if (cnt >= bound) {
-                    this.notify();
-                }
+        synchronized void incrementCounter() {
+            cnt++;
+            if (cnt >= bound) {
+                this.notify();
             }
         }
 
-        void waitCompletion() throws InterruptedException {
-            synchronized (this) {
-                while (!(cnt >= bound)) {
-                    this.wait();
-                }
+        synchronized void waitCompletion() throws InterruptedException {
+            while (!(cnt >= bound)) {
+                this.wait();
             }
         }
     }
@@ -109,7 +103,7 @@ public class ParallelMapperImpl implements ParallelMapper {
                     try {
                         resultList.set(pos, f.apply(args.get(pos)));
                     } catch (Exception e) {
-                            taskMeta.setException(e);
+                        taskMeta.setException(e);
                     } finally {
                         taskMeta.incrementCounter();
                     }

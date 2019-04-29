@@ -2,7 +2,14 @@ package ru.ifmo.rain.krotkov.hello;
 
 import info.kgeorgiy.java.advanced.hello.HelloClient;
 
-public class HelloUPDClient implements HelloClient {
+import java.io.IOException;
+import java.net.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
+
+public class HelloUDPClient implements HelloClient {
     @Override
     public void run(String host, int port, String prefix, int threads, int requests) {
         InetAddress add;
