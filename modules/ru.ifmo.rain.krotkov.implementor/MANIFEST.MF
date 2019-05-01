@@ -1,0 +1,4 @@
+Created-By: krotkov
+Manifest-Version: 1.0.0
+Main-Class: ru.ifmo.rain.krotkov.implementor.Implementor
+Class-Path: info.kgeorgiy.java.advanced.implementor.jar

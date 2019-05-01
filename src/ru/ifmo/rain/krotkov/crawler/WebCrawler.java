@@ -12,6 +12,7 @@ public class WebCrawler implements Crawler {
     private final ExecutorService downloadersPoll; /* Get pages */
     private final ExecutorService extractorsPoll; /* Parse page */
     private final Downloader downloader;
+
     private class HostData {
         int load;
         Queue<Runnable> tasks = new ArrayDeque<>();

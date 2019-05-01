@@ -54,7 +54,6 @@ public class ParallelMapperImpl implements ParallelMapper {
         private int cnt;
         private int bound;
 
-
         TaskMeta(int bound) {
             this.bound = bound;
         }
