@@ -1,6 +1,7 @@
 package ru.ifmo.rain.krotkov.crawler;
 
 import info.kgeorgiy.java.advanced.crawler.*;
+import net.java.quickcheck.collection.Pair;
 
 import java.io.IOException;
 import java.net.MalformedURLException;
@@ -9,104 +10,51 @@ import java.util.concurrent.*;
 
 public class WebCrawler implements Crawler {
     private final int perHostLimit;
-    private final ExecutorService downloadersPoll; /* Get pages */
-    private final ExecutorService extractorsPoll; /* Parse page */
+    private final ExecutorService downloadersPool;
+    private final ExecutorService extractorsPool;
     private final Downloader downloader;
+    private final ConcurrentMap<String, HostInfo> hostInfoMap;
 
-    private class HostData {
-        int load;
-        Queue<Runnable> tasks = new ArrayDeque<>();
+    private final int DEFAULT_TIMEOUT = 800; //milliseconds;
+
+    private class HostInfo {
+        int fullness;
+        Queue<Runnable> tasks = new LinkedBlockingQueue<>();
+
+        synchronized void pollTask() {
+            if (!tasks.isEmpty()) {
+                downloadersPool.submit(tasks.poll());
+            } else {
+                fullness--;
+            }
+        }
+
+        synchronized void pushTask(Runnable task) {
+            if (fullness >= perHostLimit) {
+                tasks.add(task);
+            } else {
+                fullness++;
+                downloadersPool.submit(task);
+            }
+        }
     }
-
-    private final Map<String, HostData> hostDataMap;
 
     public WebCrawler(Downloader downloader, int downloaders, int extractors, int perHost) {
         this.perHostLimit = perHost;
         this.downloader = downloader;
-        this.downloadersPoll = Executors.newFixedThreadPool(downloaders);
-        this.extractorsPoll = Executors.newFixedThreadPool(extractors);
+        this.downloadersPool = Executors.newFixedThreadPool(downloaders);
+        this.extractorsPool = Executors.newFixedThreadPool(extractors);
 
-        hostDataMap = new ConcurrentHashMap<>();
-    }
-
-    private Optional<String> getHost(String url, Map<String, IOException> exceptions) {
-        Optional<String> ret = Optional.empty();
-        try {
-            ret = Optional.of(URLUtils.getHost(url));
-        } catch (MalformedURLException e) {
-            exceptions.put(url, e);
-        }
-        return ret;
-    }
-
-    private void downloadRec(String url, int stepsLeft, Phaser phaser,
-                             final Set<String> result, final Map<String, IOException> exceptions) {
-        if (result.contains(url)) {
-            return;
-        }
-        result.add(url);
-
-        getHost(url, exceptions).ifPresent(hostName -> {
-            Runnable downloaderTask = () -> {
-                try {
-                    Document downloaded = downloader.download(url);
-
-                    Runnable extractorsTask = () -> {
-                        try {
-                            if (stepsLeft != 1) {
-                                for (String link : downloaded.extractLinks()) {
-                                    downloadRec(link, stepsLeft - 1, phaser, result, exceptions);
-                                }
-                            }
-                        } catch (IOException e) {
-                            exceptions.put(url, e);
-                        } finally {
-                            phaser.arrive();
-                        }
-                    };
-
-                    phaser.register();
-                    extractorsPoll.submit(extractorsTask);
-                } catch (IOException e) {
-                    exceptions.put(url, e);
-                }
-
-                /* We have this host */
-                hostDataMap.computeIfPresent(hostName, ((s, hostInfo) -> {
-                    if (!hostInfo.tasks.isEmpty()) {
-                        downloadersPoll.submit(hostInfo.tasks.poll());
-                    } else {
-                        hostInfo.load = hostInfo.load - 1;
-                    }
-                    return hostInfo;
-                }));
-                phaser.arrive();
-            };
-
-            phaser.register();
-
-            hostDataMap.compute(hostName, ((s, hostInfo) -> {
-                if (hostInfo == null) {
-                    hostInfo = new HostData();
-                }
-                if (hostInfo.load >= perHostLimit) {
-                    hostInfo.tasks.add(downloaderTask);
-                } else {
-                    hostInfo.load = hostInfo.load + 1;
-                    downloadersPoll.submit(downloaderTask);
-                }
-                return hostInfo;
-            }));
-        });
+        this.hostInfoMap = new ConcurrentHashMap<>();
     }
 
     @Override
     public Result download(String url, int depth) {
         Set<String> result = new ConcurrentSkipListSet<>();
         Map<String, IOException> exceptions = new ConcurrentHashMap<>();
-
         Phaser phaser = new Phaser(1);
-        downloadRec(url, depth, phaser, result, exceptions);
+
+        breadthFirstDownload(url, depth, phaser, result, exceptions);
         phaser.arriveAndAwaitAdvance();
 
         result.removeAll(exceptions.keySet());
@@ -115,32 +63,108 @@ public class WebCrawler implements Crawler {
 
     @Override
     public void close() {
-        extractorsPoll.shutdownNow();
-        downloadersPoll.shutdownNow();
+        shutdownExecutorService(extractorsPool, DEFAULT_TIMEOUT);
+        shutdownExecutorService(downloadersPool, DEFAULT_TIMEOUT);
+    }
+
+    private void shutdownExecutorService(ExecutorService executorService, long timeout) {
+        try {
+            executorService.shutdown();
+            executorService.awaitTermination(timeout, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void breadthFirstDownload(final String initialUrl, final int initialDepth, final Phaser phaser,
+                                      final Set<String> result, final Map<String, IOException> exceptions) {
+        Queue<Pair<Integer, Set<String>>> urlPackQueue = new ArrayDeque<>();
+        urlPackQueue.add(new Pair<>(initialDepth, Set.of(initialUrl)));
+
+        while (!urlPackQueue.isEmpty()) {
+            Pair<Integer, Set<String>> urlPack = urlPackQueue.poll();
+            int depth = urlPack.getFirst();
+
+            Set<String> nextUrlPack = new ConcurrentSkipListSet<>();
+            Phaser localPhaser = new Phaser(1);
+
+            for (String url : urlPack.getSecond()) {
+                if (exceptions.keySet().contains(url) || !result.add(url)) {
+                    continue;
+                }
+
+                String hostName;
+                try {
+                    hostName = URLUtils.getHost(url);
+                } catch (MalformedURLException e) {
+                    exceptions.put(url, e);
+                    continue;
+                }
+
+                Runnable downloaderTask = () -> {
+                    try {
+                        Document document = downloader.download(url);
+
+                        localPhaser.register();
+                        Runnable extractorsTask = () -> {
+                            try {
+                                nextUrlPack.addAll(document.extractLinks());
+                            } catch (IOException e) {
+                                exceptions.put(url, e);
+                            } finally {
+                                localPhaser.arrive();
+                            }
+                        };
+                        extractorsPool.submit(extractorsTask);
+                    } catch (IOException e) {
+                        exceptions.put(url, e);
+                    }
+
+                    hostInfoMap.get(hostName).pollTask();
+                    localPhaser.arrive();
+                };
+
+                localPhaser.register();
+                hostInfoMap.computeIfAbsent(hostName, h -> new HostInfo()).pushTask(downloaderTask);
+            }
+
+            localPhaser.arriveAndAwaitAdvance();
+            if (depth > 1) {
+                urlPackQueue.add(new Pair<>(depth - 1, nextUrlPack));
+            }
+        }
+
+        phaser.arrive();
     }
 
 
-    private static int getArg(String[] args, int index, int noExist) {
-        return args.length > index ? Integer.parseInt(args[index]) : noExist;
+    private static int getArgumentByIndex(final String[] args, int index, int defaultValue) {
+        return index < args.length ? Integer.parseInt(args[index]) : defaultValue;
     }
 
     public static void main(String[] args) {
         try {
-            if (args.length <= 2) {
-                System.out.println("Two parameters expected");
+            if (args == null || args.length <= 2) {
+                System.out.println("At least two arguments expected");
                 return;
             }
+            for (int index = 0; index < args.length; index++) {
+                if (args[index] == null) {
+                    System.out.println("Non-null argument expected at index " + index);
+                    return;
+                }
+            }
 
-            int downloads = getArg(args, 1, 8);
-            int extractors = getArg(args, 2, 8);
-            int perHost = getArg(args, 3, 4);
-            int depth = getArg(args, 4, 2);
+            int downloaders = getArgumentByIndex(args, 1, 4);
+            int extractors = getArgumentByIndex(args, 2, 4);
+            int perHost = getArgumentByIndex(args, 3, 4);
+            int depth = getArgumentByIndex(args, 4, 2);
 
             Downloader downloader = new CachingDownloader();
-            WebCrawler webCrawler = new WebCrawler(downloader, downloads, extractors, perHost);
+            WebCrawler webCrawler = new WebCrawler(downloader, downloaders, extractors, perHost);
             Result result = webCrawler.download(args[0], depth);
             System.out.println("Downloaded size: " + result.getDownloaded().size() + ", errors size: " + result.getErrors().size());
-        } catch (IOException e) {
+        } catch (IOException | NumberFormatException e) {
             System.out.println(e.getMessage());
         }
     }

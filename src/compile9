@@ -1,0 +1,1 @@
+javac -cp ../lib/quickcheck-0.6.jar:../artifacts/info.kgeorgiy.java.advanced.crawler.jar ru/ifmo/rain/krotkov/crawler/*.java
