@@ -1,1 +1,0 @@
-java -cp . -p ../lib:../artifacts -m info.kgeorgiy.java.advanced.crawler hard ru.ifmo.rain.krotkov.crawler.WebCrawler

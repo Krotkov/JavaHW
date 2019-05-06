@@ -54,7 +54,7 @@ public class WebCrawler implements Crawler {
         Map<String, IOException> exceptions = new ConcurrentHashMap<>();
         Phaser phaser = new Phaser(1);
 
-        breadthFirstDownload(url, depth, phaser, result, exceptions);
+        bfsDownload(url, depth, phaser, result, exceptions);
         phaser.arriveAndAwaitAdvance();
 
         result.removeAll(exceptions.keySet());
@@ -76,16 +76,16 @@ public class WebCrawler implements Crawler {
         }
     }
 
-    private void breadthFirstDownload(final String initialUrl, final int initialDepth, final Phaser phaser,
-                                      final Set<String> result, final Map<String, IOException> exceptions) {
-        Queue<Pair<Integer, Set<String>>> urlPackQueue = new ArrayDeque<>();
-        urlPackQueue.add(new Pair<>(initialDepth, Set.of(initialUrl)));
+    private void bfsDownload(final String initialUrl, final int initialDepth, final Phaser phaser,
+                             final Set<String> result, final Map<String, IOException> exceptions) {
+        Queue<Pair<Integer, List<String>>> urlPackQueue = new ArrayDeque<>();
+        urlPackQueue.add(new Pair<>(initialDepth, List.of(initialUrl)));
 
         while (!urlPackQueue.isEmpty()) {
-            Pair<Integer, Set<String>> urlPack = urlPackQueue.poll();
+            Pair<Integer, List<String>> urlPack = urlPackQueue.poll();
             int depth = urlPack.getFirst();
 
-            Set<String> nextUrlPack = new ConcurrentSkipListSet<>();
+            List<String> nextUrlPack = new CopyOnWriteArrayList<>();
             Phaser localPhaser = new Phaser(1);
 
             for (String url : urlPack.getSecond()) {
