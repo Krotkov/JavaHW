@@ -15,7 +15,7 @@ public class WebCrawler implements Crawler {
     private final Downloader downloader;
     private final ConcurrentMap<String, HostInfo> hostInfoMap;
 
-    private final int DEFAULT_TIMEOUT = 800; //milliseconds;
+    private final int DEFAULT_TIMEOUT = 1000; //milliseconds;
 
     private class HostInfo {
         int fullness;

@@ -1,4 +1,4 @@
-package ru.ifmo.rain.krotkov.mapper;
+package ru.ifmo.rain.krotkov.concurrent;
 
 import info.kgeorgiy.java.advanced.concurrent.ListIP;
 
