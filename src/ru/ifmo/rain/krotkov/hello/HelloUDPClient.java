@@ -61,7 +61,6 @@ public class HelloUDPClient implements HelloClient {
     private static boolean check(final String request, final String response) {
         return  response.length() != request.length()
                 && (response.endsWith(request) || response.contains(request + " "));
-        //return response.matches(".*" + Pattern.quote(request) + "(|\\p{javaWhitespace}.*)");
     }
 
     private static String makeRequestText(final String prefix, final int thread, final int num) {

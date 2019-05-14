@@ -138,8 +138,8 @@ public class WebCrawler implements Crawler {
     }
 
 
-    private static int getArgumentByIndex(final String[] args, int index, int defaultValue) {
-        return index < args.length ? Integer.parseInt(args[index]) : defaultValue;
+    private static int getArgumentByIndex(final String[] args, int index) {
+        return index < args.length ? Integer.parseInt(args[index]) : 1;
     }
 
     public static void main(String[] args) {
@@ -155,15 +155,14 @@ public class WebCrawler implements Crawler {
                 }
             }
 
-            int downloaders = getArgumentByIndex(args, 1, 4);
-            int extractors = getArgumentByIndex(args, 2, 4);
-            int perHost = getArgumentByIndex(args, 3, 4);
-            int depth = getArgumentByIndex(args, 4, 2);
+            int downloaders = getArgumentByIndex(args, 1);
+            int extractors = getArgumentByIndex(args, 2);
+            int perHost = getArgumentByIndex(args, 3);
+            int depth = getArgumentByIndex(args, 4);
 
-            Downloader downloader = new CachingDownloader();
-            WebCrawler webCrawler = new WebCrawler(downloader, downloaders, extractors, perHost);
-            Result result = webCrawler.download(args[0], depth);
-            System.out.println("Downloaded size: " + result.getDownloaded().size() + ", errors size: " + result.getErrors().size());
+            try (WebCrawler webCrawler = new WebCrawler(new CachingDownloader(), downloaders, extractors, perHost)) {
+                webCrawler.download(args[0], depth);
+            }
         } catch (IOException | NumberFormatException e) {
             System.out.println(e.getMessage());
         }
