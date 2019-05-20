@@ -6,26 +6,18 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.SocketException;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class HelloUDPServer implements HelloServer {
     private DatagramSocket socket;
     private ExecutorService workers;
     private ExecutorService listener;
-    private boolean closed;
-    private int inBuffSize;
-    private final int POOL_SIZE = 100_000;
+    private boolean closed = true;
+    private int inBuffSize = 0;
 
-    public HelloUDPServer() {
-        socket = null;
-        workers = null;
-        closed = true;
-        inBuffSize = 0;
-    }
+    private static final int POOL_SIZE = 100000;
+    private static final int TERMINATION_AWAIT_TIMEOUT = 5; // seconds
+    private static final int EXECUTOR_LIFE_TIME = 1; // minute
 
     @Override
     public void start(int port, int threads) {
@@ -33,13 +25,14 @@ public class HelloUDPServer implements HelloServer {
             socket = new DatagramSocket(port);
             inBuffSize = socket.getReceiveBufferSize();
         } catch (SocketException e) {
-            System.err.println("Unable to create socket bounded to port №" + port);
+            System.err.println("Unable to create socket on port " + port);
             return;
         }
-        listener = Executors.newSingleThreadExecutor();
         workers = new ThreadPoolExecutor(threads, threads,
-                1, TimeUnit.MINUTES,
+                EXECUTOR_LIFE_TIME, TimeUnit.MINUTES,
                 new ArrayBlockingQueue<>(POOL_SIZE), new ThreadPoolExecutor.DiscardPolicy());
+        listener = Executors.newSingleThreadExecutor();
+
         closed = false;
         listener.submit(this::receiveAndRespond);
     }
@@ -47,7 +40,7 @@ public class HelloUDPServer implements HelloServer {
     private void receiveAndRespond() {
         while (!socket.isClosed() && !Thread.currentThread().isInterrupted()) {
             try {
-                final DatagramPacket msg = MsgUtils.makeMsgToReceive(inBuffSize);
+                final DatagramPacket msg = MessageSupport.newMessage(inBuffSize);
                 socket.receive(msg);
                 workers.submit(() -> sendResponse(msg));
             } catch (IOException e) {
@@ -59,11 +52,10 @@ public class HelloUDPServer implements HelloServer {
     }
 
     private void sendResponse(final DatagramPacket msg) {
-        final String msgText = MsgUtils.getMsgText(msg);
+        final String msgText = MessageSupport.getText(msg);
         try {
-            final DatagramPacket respond = MsgUtils.makeMsgToSend(msg.getSocketAddress(), 0);
-            MsgUtils.setMsgText(respond, "Hello, " + msgText);
-            socket.send(respond);
+            MessageSupport.setText(msg, "Hello, " + msgText);
+            socket.send(msg);
         } catch (IOException e) {
             if (!closed) {
                 System.err.println("Error occurred during processing datagram: " + e.getMessage());
@@ -73,25 +65,28 @@ public class HelloUDPServer implements HelloServer {
 
     @Override
     public void close() {
+        if (closed) {
+            return;
+        }
         closed = true;
         socket.close();
-        listener.shutdownNow();
-        workers.shutdownNow();
+        workers.shutdown();
+        listener.shutdown();
         try {
-            workers.awaitTermination(5, TimeUnit.SECONDS);
+            workers.awaitTermination(TERMINATION_AWAIT_TIMEOUT, TimeUnit.SECONDS);
         } catch (InterruptedException ignored) {
         }
     }
 
     public static void main(String[] args) {
         if (args == null || args.length != 2 || args[0] == null || args[1] == null) {
-            System.err.println("2 non-null arguments expected");
+            System.err.println("Two non-null arguments expected");
             return;
         }
         try {
             new HelloUDPServer().start(Integer.parseInt(args[0]), Integer.parseInt(args[1]));
         } catch (NumberFormatException e) {
-            System.err.println("Integer arguments expected");
+            System.err.println("Integer expected: " + e.getMessage());
         }
     }
 }

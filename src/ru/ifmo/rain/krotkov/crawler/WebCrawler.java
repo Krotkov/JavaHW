@@ -29,7 +29,7 @@ public class WebCrawler implements Crawler {
             }
         }
 
-        synchronized void pushTask(Runnable task) {
+        synchronized void submit(Runnable task) {
             if (fullness >= perHostLimit) {
                 tasks.add(task);
             } else {
@@ -78,14 +78,14 @@ public class WebCrawler implements Crawler {
 
     private void bfsDownload(final String initialUrl, final int initialDepth, final Phaser phaser,
                              final Set<String> result, final Map<String, IOException> exceptions) {
-        Queue<Pair<Integer, List<String>>> urlPackQueue = new ArrayDeque<>();
-        urlPackQueue.add(new Pair<>(initialDepth, List.of(initialUrl)));
+        Queue<Pair<Integer, Set<String>>> urlPackQueue = new ArrayDeque<>();
+        urlPackQueue.add(new Pair<>(initialDepth, Set.of(initialUrl)));
 
         while (!urlPackQueue.isEmpty()) {
-            Pair<Integer, List<String>> urlPack = urlPackQueue.poll();
+            Pair<Integer, Set<String>> urlPack = urlPackQueue.poll();
             int depth = urlPack.getFirst();
 
-            List<String> nextUrlPack = new CopyOnWriteArrayList<>();
+            Set<String> nextUrlPack = new ConcurrentSkipListSet<>();
             Phaser localPhaser = new Phaser(1);
 
             for (String url : urlPack.getSecond()) {
@@ -101,12 +101,14 @@ public class WebCrawler implements Crawler {
                     continue;
                 }
 
-                Runnable downloaderTask = () -> {
+                localPhaser.register();
+                HostInfo hostInfo = hostInfoMap.computeIfAbsent(hostName, h -> new HostInfo());
+                hostInfo.submit(() -> {
                     try {
                         Document document = downloader.download(url);
 
                         localPhaser.register();
-                        Runnable extractorsTask = () -> {
+                        extractorsPool.submit(() -> {
                             try {
                                 nextUrlPack.addAll(document.extractLinks());
                             } catch (IOException e) {
@@ -114,18 +116,14 @@ public class WebCrawler implements Crawler {
                             } finally {
                                 localPhaser.arrive();
                             }
-                        };
-                        extractorsPool.submit(extractorsTask);
+                        });
                     } catch (IOException e) {
                         exceptions.put(url, e);
                     }
 
-                    hostInfoMap.get(hostName).pollTask();
+                    hostInfo.pollTask();
                     localPhaser.arrive();
-                };
-
-                localPhaser.register();
-                hostInfoMap.computeIfAbsent(hostName, h -> new HostInfo()).pushTask(downloaderTask);
+                });
             }
 
             localPhaser.arriveAndAwaitAdvance();

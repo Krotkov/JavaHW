@@ -18,6 +18,11 @@ case $1 in
     10s)
         bash run.sh hello server-i18n HelloUDPServer $2
         ;;
+    
+    10)
+	bash run.sh hello client-i18n HelloUPDClient $2;
+	bash run.sh hello server-i18n HelloUPDServer $2
+	;;
     *)
 	    ./run.sh ${tasks[(($1-1))]} $2
         ;;
