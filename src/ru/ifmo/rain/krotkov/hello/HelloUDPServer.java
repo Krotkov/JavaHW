@@ -6,18 +6,16 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.SocketException;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.*;
 
 public class HelloUDPServer implements HelloServer {
     private DatagramSocket socket;
     private ExecutorService workers;
     private ExecutorService listener;
-    private boolean closed = true;
     private int inBuffSize = 0;
 
-    private static final int POOL_SIZE = 100000;
     private static final int TERMINATION_AWAIT_TIMEOUT = 5; // seconds
-    private static final int EXECUTOR_LIFE_TIME = 1; // minute
 
     @Override
     public void start(int port, int threads) {
@@ -28,47 +26,38 @@ public class HelloUDPServer implements HelloServer {
             System.err.println("Unable to create socket on port " + port);
             return;
         }
-        workers = new ThreadPoolExecutor(threads, threads,
-                EXECUTOR_LIFE_TIME, TimeUnit.MINUTES,
-                new ArrayBlockingQueue<>(POOL_SIZE), new ThreadPoolExecutor.DiscardPolicy());
+        workers = Executors.newFixedThreadPool(threads);
         listener = Executors.newSingleThreadExecutor();
 
-        closed = false;
-        listener.submit(this::receiveAndRespond);
-    }
-
-    private void receiveAndRespond() {
-        while (!socket.isClosed() && !Thread.currentThread().isInterrupted()) {
-            try {
-                final DatagramPacket msg = MessageSupport.newMessage(inBuffSize);
-                socket.receive(msg);
-                workers.submit(() -> sendResponse(msg));
-            } catch (IOException e) {
-                if (!closed) {
-                    System.err.println("Error occurred during processing datagram: " + e.getMessage());
+        listener.submit(() -> {
+            while (!socket.isClosed() && !Thread.currentThread().isInterrupted()) {
+                try {
+                    final byte[] buffer = new byte[inBuffSize];
+                    final DatagramPacket msg = new DatagramPacket(buffer, inBuffSize);
+                    socket.receive(msg);
+                    workers.submit(() -> {
+                        final String msgText = new String(msg.getData(), 0, msg.getLength(), StandardCharsets.UTF_8);
+                        final String responseText = "Hello, " + msgText;
+                        try {
+                            msg.setData(responseText.getBytes(StandardCharsets.UTF_8));
+                            socket.send(msg);
+                        } catch (IOException e) {
+                            if (!socket.isClosed()) {
+                                System.err.println("Error occurred during processing datagram: " + e.getMessage());
+                            }
+                        }
+                    });
+                } catch (IOException e) {
+                    if (!socket.isClosed()) {
+                        System.err.println("Error occurred during processing datagram: " + e.getMessage());
+                    }
                 }
             }
-        }
-    }
-
-    private void sendResponse(final DatagramPacket msg) {
-        final String msgText = MessageSupport.getText(msg);
-        try {
-            MessageSupport.setText(msg, "Hello, " + msgText);
-            socket.send(msg);
-        } catch (IOException e) {
-            if (!closed) {
-                System.err.println("Error occurred during processing datagram: " + e.getMessage());
-            }
-        }
+        });
     }
 
     @Override
     public void close() {
-        if (closed) {
-            return;
-        }
-        closed = true;
         socket.close();
         workers.shutdown();
         listener.shutdown();

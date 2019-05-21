@@ -10,9 +10,13 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 
 public class HelloUDPClient implements HelloClient {
     private static final int SOCKET_SO_TIMEOUT = 500; //milliseconds
@@ -34,10 +38,7 @@ public class HelloUDPClient implements HelloClient {
         final SocketAddress dst = new InetSocketAddress(addr, port);
         final ExecutorService workers = Executors.newFixedThreadPool(threads);
 
-        for (int i = 0; i < threads; i++) {
-            final int id = i;
-            workers.submit(() -> sendAndReceive(dst, prefix, requests, id));
-        }
+        IntStream.range(0, threads).forEach(id -> workers.submit(() -> sendAndReceive(dst, prefix, requests, id)));
 
         workers.shutdown();
         try {
@@ -46,23 +47,21 @@ public class HelloUDPClient implements HelloClient {
         }
     }
 
-    private static void sendAndReceive(final SocketAddress addr, final String prefix, int cnt, int id) {
+    private static void sendAndReceive(final SocketAddress addr, final String prefix, int requests, int id) {
         try (DatagramSocket socket = new DatagramSocket()) {
             socket.setSoTimeout(SOCKET_SO_TIMEOUT);
-            final DatagramPacket msg = MessageSupport.newEmptyMessage();
-            msg.setSocketAddress(addr);
-
-            for (int num = 0; num < cnt; num++) {
-                final String requestText = buildRequestText(prefix, id, num);
+            final byte[] buffer = new byte[socket.getReceiveBufferSize()];
+            final DatagramPacket response = new DatagramPacket(buffer, socket.getReceiveBufferSize());
+            for (int num = 0; num < requests; num++) {
+                final String requestText = prefix + id + "_" + num;
+                byte[] dataRequest = requestText.getBytes(StandardCharsets.UTF_8);
+                DatagramPacket msg = new DatagramPacket(dataRequest, requestText.length(), addr);
                 while (!socket.isClosed() || Thread.currentThread().isInterrupted()) {
                     try {
-                        MessageSupport.setText(msg, requestText);
                         socket.send(msg);
                         System.out.println("Request sent:\n" + requestText + "\n");
-
-                        MessageSupport.resize(msg, socket.getReceiveBufferSize());
-                        socket.receive(msg);
-                        String responseText = MessageSupport.getText(msg);
+                        socket.receive(response);
+                        String responseText = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
                         if (responseText.contains(requestText)) {
                             System.out.println("Response received:\n" + responseText + "\n");
                             break;
@@ -77,20 +76,14 @@ public class HelloUDPClient implements HelloClient {
         }
     }
 
-    private static String buildRequestText(final String prefix, int thread, int num) {
-        return prefix + thread + "_" + num;
-    }
-
     public static void main(String[] args) {
         if (args == null || args.length != 5) {
             System.err.println("Five arguments expected");
             return;
         }
-        for (int i = 0; i < 5; i++) {
-            if (args[i] == null) {
-                System.err.println("Non-null argument expected at position " + i);
-                return;
-            }
+        if (Arrays.stream(args).anyMatch(Objects::isNull)) {
+            System.err.println("Non-null arguments expected");
+            return;
         }
         try {
             new HelloUDPClient().run(args[0], Integer.parseInt(args[1]), args[2], Integer.parseInt(args[3]), Integer.parseInt(args[4]));
