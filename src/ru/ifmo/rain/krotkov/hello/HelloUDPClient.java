@@ -52,7 +52,7 @@ public class HelloUDPClient implements HelloClient {
                             socket.send(msg);
                             System.out.println("Request sent:\n" + requestText + "\n");
                             socket.receive(response);
-                            String responseText = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
+                            String responseText = new String(response.getData(), response.getOffset(), response.getLength(), StandardCharsets.UTF_8);
                             if (responseText.contains(requestText)) {
                                 System.out.println("Response received:\n" + responseText + "\n");
                                 break;

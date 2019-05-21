@@ -9,6 +9,8 @@ import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.*;
 
+import static java.util.Objects.isNull;
+
 public class HelloUDPServer implements HelloServer {
     private DatagramSocket socket;
     private ExecutorService workers;
@@ -36,7 +38,7 @@ public class HelloUDPServer implements HelloServer {
                     final DatagramPacket msg = new DatagramPacket(buffer, inBuffSize);
                     socket.receive(msg);
                     workers.submit(() -> {
-                        final String msgText = new String(msg.getData(), 0, msg.getLength(), StandardCharsets.UTF_8);
+                        final String msgText = new String(msg.getData(), msg.getOffset(), msg.getLength(), StandardCharsets.UTF_8);
                         final String responseText = "Hello, " + msgText;
                         try {
                             msg.setData(responseText.getBytes(StandardCharsets.UTF_8));
@@ -58,12 +60,14 @@ public class HelloUDPServer implements HelloServer {
 
     @Override
     public void close() {
-        socket.close();
-        workers.shutdown();
-        listener.shutdown();
-        try {
-            workers.awaitTermination(TERMINATION_AWAIT_TIMEOUT, TimeUnit.SECONDS);
-        } catch (InterruptedException ignored) {
+        if (!isNull(socket)) {
+            socket.close();
+            workers.shutdown();
+            listener.shutdown();
+            try {
+                workers.awaitTermination(TERMINATION_AWAIT_TIMEOUT, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+            }
         }
     }
 
